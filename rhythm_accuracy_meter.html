@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pure Data Beat Accuracy Tracker</title>
+    <!-- Tailwind CSS for layout utilities -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom Pure Data UI Styling */
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #f0f0f0;
+            color: #000000;
+            user-select: none;
+        }
+
+        .pd-canvas {
+            background-color: #ffffff;
+            border: 2px solid #000000;
+            box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.15);
+        }
+
+        .pd-border {
+            border: 2px solid #000000;
+        }
+
+        /* Pure Data Floatatom Bevelled Style */
+        .floatatom {
+            background-color: #ffffff;
+            border: 2px solid #000000;
+            clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+            font-weight: bold;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        /* Custom Range Slider styling for authentic PD look */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+
+        input[type=range]:focus {
+            outline: none;
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 12px;
+            cursor: pointer;
+            background: #e0e0e0;
+            border: 1px solid #000000;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            height: 20px;
+            width: 8px;
+            background: #000000;
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -5px;
+        }
+
+        /* Concentric Squares Container */
+        .squares-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 0 auto;
+        }
+
+        .square-outer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 300px;
+            height: 300px;
+            transition: background-color 0.15s ease;
+        }
+
+        .square-med {
+            position: absolute;
+            top: 50px;
+            left: 50px;
+            width: 200px;
+            height: 200px;
+            transition: background-color 0.15s ease;
+        }
+
+        .square-sml {
+            position: absolute;
+            top: 100px;
+            left: 100px;
+            width: 100px;
+            height: 100px;
+            transition: background-color 0.15s ease;
+        }
+
+        .bang-circle {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 2px solid #000000;
+            background-color: #ffffff;
+            transition: background-color 0.05s ease;
+        }
+
+        .bang-circle.active {
+            background-color: #000000;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 flex flex-col items-center justify-center">
+
+    <!-- Main Pd Canvas Frame -->
+    <div class="pd-canvas w-full max-w-lg p-6 rounded-none relative">
+        
+        <!-- Header Controls & Toggle -->
+        <div class="flex items-center justify-between mb-6">
+            <label class="flex items-center space-x-3 cursor-pointer text-xl font-bold">
+                <input type="checkbox" id="powerToggle" class="w-6 h-6 accent-black border-2 border-black cursor-pointer">
+                <span>on/off</span>
+            </label>
+
+            <!-- Secondary Utility Action Controls -->
+            <div class="flex items-center space-x-2">
+                <button id="resetBtn" class="pd-border px-3 py-1 text-sm font-bold bg-gray-100 hover:bg-gray-200 active:bg-black active:text-white transition">
+                    RESET
+                </button>
+                <button id="metronomeToggle" class="pd-border px-3 py-1 text-sm font-bold bg-gray-100 hover:bg-gray-200 transition">
+                    METRONOME: OFF
+                </button>
+            </div>
+        </div>
+
+        <!-- Set Level Box Section -->
+        <div class="mb-6">
+            <div class="text-lg font-bold mb-1">set level</div>
+            <div class="pd-border p-3 bg-white grid grid-cols-12 gap-3 items-center">
+                <!-- Sliders & Meters Column (Left 9 cols) -->
+                <div class="col-span-9 space-y-3">
+                    <!-- Threshold Slider -->
+                    <div>
+                        <div class="flex justify-between text-xs font-bold mb-0.5">
+                            <span>THRESHOLD</span>
+                            <span id="thresholdVal">70</span>
+                        </div>
+                        <input type="range" id="levelSlider" min="0" max="100" value="70">
+                    </div>
+                    <!-- Audio Level Monitor Bar -->
+                    <div>
+                        <div class="text-xs font-bold mb-0.5">AUDIO INPUT (MONS)</div>
+                        <div class="w-full h-4 bg-gray-100 pd-border relative overflow-hidden">
+                            <div id="monBar" class="h-full bg-black w-0 transition-all duration-75"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Bang Indicator Box (Right 3 cols) -->
+                <div class="col-span-3 flex flex-col items-center justify-center border-l-2 border-black pl-2">
+                    <span class="text-xs font-bold mb-1">TAPS</span>
+                    <div id="tapBang" class="bang-circle cursor-pointer flex items-center justify-center" title="Click or tap key to trigger"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Floatatom Display Row -->
+        <div class="grid grid-cols-3 gap-3 mb-6 text-center">
+            <!-- Instant Error -->
+            <div>
+                <div id="instantAtom" class="floatatom py-2 px-1 text-2xl text-right pr-3 shadow-inner">0</div>
+                <div class="text-xs font-bold mt-1 text-gray-700">instant</div>
+            </div>
+            <!-- 4-Beat Average Error -->
+            <div>
+                <div id="fourAveAtom" class="floatatom py-2 px-1 text-2xl text-right pr-3 shadow-inner">0</div>
+                <div class="text-xs font-bold mt-1 text-gray-700">4-note ave</div>
+            </div>
+            <!-- 16-Beat Average Error -->
+            <div>
+                <div id="sixteenAveAtom" class="floatatom py-2 px-1 text-2xl text-right pr-3 shadow-inner">0</div>
+                <div class="text-xs font-bold mt-1 text-gray-700">16-note ave</div>
+            </div>
+        </div>
+
+        <!-- Concentric Accuracy Color Squares -->
+        <div class="flex justify-center items-center my-4">
+            <div class="squares-container pd-border">
+                <!-- Outer Square: 16-note ave error (300px) -->
+                <div id="outerSquare" class="square-outer bg-red-600 flex items-start justify-start p-1 text-xs font-bold text-black opacity-90">
+                    16-AVE
+                </div>
+                <!-- Middle Square: 4-note ave error (200px) -->
+                <div id="medSquare" class="square-med bg-amber-500 pd-border flex items-start justify-start p-1 text-xs font-bold text-black opacity-90">
+                    4-AVE
+                </div>
+                <!-- Inner Square: Instant error (100px) -->
+                <div id="smlSquare" class="square-sml bg-red-600 pd-border flex items-start justify-start p-1 text-xs font-bold text-black opacity-90">
+                    INSTANT
+                </div>
+            </div>
+        </div>
+
+        <!-- Session Telemetry & BPM Bar -->
+        <div class="mt-4 pt-3 border-t-2 border-black flex justify-between items-center text-xs font-bold">
+            <div>TEMPO: <span id="bpmDisplay" class="text-sm">--</span> BPM</div>
+            <div>TAPS RECORDED: <span id="tapCountDisplay">0</span></div>
+            <div>DELTA: <span id="lastDeltaDisplay">--</span> ms</div>
+        </div>
+
+        <!-- Metronome Control Box -->
+        <div id="metronomeBox" class="mt-3 p-2 bg-gray-50 pd-border hidden flex items-center justify-between text-xs">
+            <span class="font-bold">METRONOME BPM:</span>
+            <input type="number" id="metroBpmInput" min="40" max="240" value="120" class="pd-border px-2 py-0.5 w-16 text-center font-bold">
+            <input type="range" id="metroBpmSlider" min="40" max="240" value="120" class="w-32">
+        </div>
+
+        <!-- Instructions Drawer -->
+        <div class="mt-4 p-3 bg-gray-100 pd-border text-xs leading-relaxed">
+            <div class="font-bold mb-1">HOW TO USE:</div>
+            <ol class="list-decimal pl-4 space-y-1">
+                <li>Check <strong>on/off</strong> to enable microphone access or play via keyboard.</li>
+                <li>Tap any keyboard key (Space, Enter, etc.) or play an instrument near mic.</li>
+                <li>Adjust <strong>threshold slider</strong> so background noise doesn't trigger taps, but percussion strikes do.</li>
+                <li><strong>Green</strong> = High Accuracy (&lt;2%), <strong>Yellow</strong> = Moderate Error (~5%), <strong>Red</strong> = Inaccurate (&gt;10%).</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // Audio Engine States
+        let audioCtx = null;
+        let analyser = null;
+        let micStream = null;
+        let isAudioActive = false;
+        let metronomeInterval = null;
+        let metronomeActive = false;
+
+        // Peak Detector & Refractory States
+        let threshold = 70; // 0 - 100 scale
+        let lastTapTime = 0;
+        const REFRACTORY_PERIOD = 110; // ms minimum delay between tap triggers
+
+        // Mathematical Buffers matching Pd patch
+        let intervalBuffer = []; // stores last 4 interval deltas in ms
+        let instantErrorBuffer = []; // stores last 4 instant errors
+        let fourAveErrorBuffer = []; // stores last 4 4-note ave errors
+        let tapCounter = 0;
+
+        // DOM Elements
+        const powerToggle = document.getElementById('powerToggle');
+        const levelSlider = document.getElementById('levelSlider');
+        const thresholdVal = document.getElementById('thresholdVal');
+        const monBar = document.getElementById('monBar');
+        const tapBang = document.getElementById('tapBang');
+
+        const instantAtom = document.getElementById('instantAtom');
+        const fourAveAtom = document.getElementById('fourAveAtom');
+        const sixteenAveAtom = document.getElementById('sixteenAveAtom');
+
+        const outerSquare = document.getElementById('outerSquare');
+        const medSquare = document.getElementById('medSquare');
+        const smlSquare = document.getElementById('smlSquare');
+
+        const bpmDisplay = document.getElementById('bpmDisplay');
+        const tapCountDisplay = document.getElementById('tapCountDisplay');
+        const lastDeltaDisplay = document.getElementById('lastDeltaDisplay');
+
+        const resetBtn = document.getElementById('resetBtn');
+        const metronomeToggle = document.getElementById('metronomeToggle');
+        const metronomeBox = document.getElementById('metronomeBox');
+        const metroBpmInput = document.getElementById('metroBpmInput');
+        const metroBpmSlider = document.getElementById('metroBpmSlider');
+
+        /**
+         * Maps Pure Data Variation Error % to smooth RGB Color
+         * 0% Error   -> Bright Green (rgb(0, 230, 0))
+         * 5% Error   -> Bright Amber / Yellow (rgb(255, 200, 0))
+         * 10%+ Error -> Bright Red (rgb(255, 0, 0))
+         */
+        function calculateColor(errorVal) {
+            if (isNaN(errorVal) || errorVal === null) return 'rgb(255, 0, 0)';
+            
+            if (errorVal <= 0) return 'rgb(0, 230, 0)';
+            if (errorVal < 5) {
+                // Interpolate Green to Yellow
+                const factor = errorVal / 5.0;
+                const r = Math.round(0 + factor * 255);
+                const g = Math.round(230 + factor * (200 - 230));
+                return `rgb(${r}, ${g}, 0)`;
+            } else if (errorVal < 10) {
+                // Interpolate Yellow to Red
+                const factor = (errorVal - 5.0) / 5.0;
+                const r = 255;
+                const g = Math.round(200 - factor * 200);
+                return `rgb(${r}, ${g}, 0)`;
+            } else {
+                return 'rgb(255, 0, 0)';
+            }
+        }
+
+        /**
+         * Process a detected tap event
+         * Calculates interval deltas, variation averages, error percentages
+         */
+        function processTap() {
+            const now = performance.now();
+            tapCounter++;
+            tapCountDisplay.textContent = tapCounter;
+
+            // Flash bang indicator
+            tapBang.classList.add('active');
+            setTimeout(() => tapBang.classList.remove('active'), 80);
+
+            if (lastTapTime > 0) {
+                const delta = now - lastTapTime;
+                lastDeltaDisplay.textContent = Math.round(delta);
+
+                // Calculate instant BPM based on last interval
+                if (delta > 0) {
+                    const bpm = Math.round(60000 / delta);
+                    bpmDisplay.textContent = bpm;
+                }
+
+                // Push new interval into circular buffer (max 4 items)
+                intervalBuffer.push(delta);
+                if (intervalBuffer.length > 4) {
+                    intervalBuffer.shift();
+                }
+
+                // If we have 4 interval deltas, execute full Pd Math logic
+                if (intervalBuffer.length === 4) {
+                    const T_n = intervalBuffer[3];
+                    const T_n1 = intervalBuffer[2];
+                    const T_n2 = intervalBuffer[1];
+                    const T_n3 = intervalBuffer[0];
+
+                    // T_avg4 = (T_n + T_n1 + T_n2 + T_n3) / 4
+                    const T_avg4 = (T_n + T_n1 + T_n2 + T_n3) / 4.0;
+
+                    // Consecutive interval difference absolute variations
+                    const d1 = Math.abs(T_n - T_n1);
+                    const d2 = Math.abs(T_n1 - T_n2);
+                    const d3 = Math.abs(T_n2 - T_n3);
+
+                    // Mean variation difference
+                    const D_mean = (d1 + d2 + d3) / 3.0;
+
+                    // Instant error % = (D_mean / T_avg4) * 100
+                    const instantError = Math.round((D_mean / T_avg4) * 100);
+                    instantAtom.textContent = instantError;
+                    smlSquare.style.backgroundColor = calculateColor(instantError);
+
+                    // Push instant error to 4-ave buffer
+                    instantErrorBuffer.push(instantError);
+                    if (instantErrorBuffer.length > 4) {
+                        instantErrorBuffer.shift();
+                    }
+
+                    if (instantErrorBuffer.length === 4) {
+                        const fourAveError = Math.round(
+                            instantErrorBuffer.reduce((a, b) => a + b, 0) / 4.0
+                        );
+                        fourAveAtom.textContent = fourAveError;
+                        medSquare.style.backgroundColor = calculateColor(fourAveError);
+
+                        // Push 4-ave error to 16-ave buffer
+                        fourAveErrorBuffer.push(fourAveError);
+                        if (fourAveErrorBuffer.length > 4) {
+                            fourAveErrorBuffer.shift();
+                        }
+
+                        if (fourAveErrorBuffer.length === 4) {
+                            const sixteenAveError = Math.round(
+                                fourAveErrorBuffer.reduce((a, b) => a + b, 0) / 4.0
+                            );
+                            sixteenAveAtom.textContent = sixteenAveError;
+                            outerSquare.style.backgroundColor = calculateColor(sixteenAveError);
+                        }
+                    }
+                }
+            }
+
+            lastTapTime = now;
+        }
+
+        async function startAudio() {
+            try {
+                if (!audioCtx) {
+                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume();
+                }
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                micStream = stream;
+                const source = audioCtx.createMediaStreamSource(stream);
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 512;
+                analyser.smoothingTimeConstant = 0.2;
+                source.connect(analyser);
+
+                isAudioActive = true;
+                processAudioFrame();
+            } catch (err) {
+                console.error("Microphone access error:", err);
+                alert("Microphone permission denied or not available. Keyboard tapping will still work!");
+                powerToggle.checked = false;
+            }
+        }
+
+        function stopAudio() {
+            isAudioActive = false;
+            if (micStream) {
+                micStream.getTracks().forEach(track => track.stop());
+                micStream = null;
+            }
+            monBar.style.width = '0%';
+        }
+
+        function processAudioFrame() {
+            if (!isAudioActive || !analyser) return;
+
+            const timeDomainData = new Float32Array(analyser.fftSize);
+            analyser.getFloatTimeDomainData(timeDomainData);
+
+            // Compute peak amplitude
+            let maxPeak = 0;
+            for (let i = 0; i < timeDomainData.length; i++) {
+                const absVal = Math.abs(timeDomainData[i]);
+                if (absVal > maxPeak) {
+                    maxPeak = absVal;
+                }
+            }
+
+            // Scale to 0-100 range
+            const currentLevel = Math.min(100, Math.round(maxPeak * 100 * 2.5));
+
+            // Update GUI audio meter ("mons")
+            monBar.style.width = currentLevel + '%';
+
+            // Peak threshold comparison with refractory period check
+            const now = performance.now();
+            if (currentLevel >= threshold && (now - lastTapTime) > REFRACTORY_PERIOD) {
+                processTap();
+            }
+
+            requestAnimationFrame(processAudioFrame);
+        }
+
+        function playClickSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.05);
+        }
+
+        function startMetronome() {
+            const bpm = parseInt(metroBpmInput.value) || 120;
+            const intervalMs = (60 / bpm) * 1000;
+            stopMetronome();
+            metronomeInterval = setInterval(() => {
+                playClickSound();
+            }, intervalMs);
+            metronomeActive = true;
+            metronomeToggle.textContent = `METRONOME: ON (${bpm} BPM)`;
+            metronomeToggle.classList.add('bg-black', 'text-white');
+        }
+
+        function stopMetronome() {
+            if (metronomeInterval) {
+                clearInterval(metronomeInterval);
+                metronomeInterval = null;
+            }
+            metronomeActive = false;
+            metronomeToggle.textContent = 'METRONOME: OFF';
+            metronomeToggle.classList.remove('bg-black', 'text-white');
+        }
+
+        function resetSession() {
+            intervalBuffer = [];
+            instantErrorBuffer = [];
+            fourAveErrorBuffer = [];
+            tapCounter = 0;
+            lastTapTime = 0;
+
+            instantAtom.textContent = '0';
+            fourAveAtom.textContent = '0';
+            sixteenAveAtom.textContent = '0';
+
+            bpmDisplay.textContent = '--';
+            tapCountDisplay.textContent = '0';
+            lastDeltaDisplay.textContent = '--';
+
+            const defaultRed = 'rgb(255, 0, 0)';
+            outerSquare.style.backgroundColor = defaultRed;
+            medSquare.style.backgroundColor = 'rgb(255, 200, 0)';
+            smlSquare.style.backgroundColor = defaultRed;
+        }
+
+        // GUI Listeners
+        powerToggle.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                startAudio();
+            } else {
+                stopAudio();
+            }
+        });
+
+        levelSlider.addEventListener('input', (e) => {
+            threshold = parseInt(e.target.value);
+            thresholdVal.textContent = threshold;
+        });
+
+        tapBang.addEventListener('pointerdown', () => {
+            const now = performance.now();
+            if ((now - lastTapTime) > REFRACTORY_PERIOD) {
+                processTap();
+            }
+        });
+
+        resetBtn.addEventListener('click', resetSession);
+
+        metronomeToggle.addEventListener('click', () => {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (metronomeActive) {
+                stopMetronome();
+                metronomeBox.classList.add('hidden');
+            } else {
+                metronomeBox.classList.remove('hidden');
+                startMetronome();
+            }
+        });
+
+        metroBpmInput.addEventListener('change', () => {
+            metroBpmSlider.value = metroBpmInput.value;
+            if (metronomeActive) startMetronome();
+        });
+
+        metroBpmSlider.addEventListener('input', () => {
+            metroBpmInput.value = metroBpmSlider.value;
+            if (metronomeActive) startMetronome();
+        });
+
+        // Keyboard Event Listener for Tapping
+        window.addEventListener('keydown', (e) => {
+            // Avoid triggering when user is typing into input fields
+            if (e.target.tagName === 'INPUT') return;
+
+            // Prevent browser scrolling on spacebar
+            if (e.code === 'Space') {
+                e.preventDefault();
+            }
+
+            const now = performance.now();
+            if ((now - lastTapTime) > REFRACTORY_PERIOD) {
+                processTap();
+            }
+        });
+
+        // Initial setup
+        resetSession();
+    </script>
+</body>
+</html>
