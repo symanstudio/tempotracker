@@ -1,583 +1,555 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pure Data Beat Accuracy Tracker</title>
-    <!-- Tailwind CSS for layout utilities -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Custom Pure Data UI Styling */
-        body {
-            font-family: 'Courier New', Courier, monospace;
-            background-color: #f0f0f0;
-            color: #000000;
-            user-select: none;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pure Data Tempo Tracker & Accuracy Meter</title>
+  <!-- Suppress 404 favicon requests in local server logs -->
+  <link rel="icon" href="data:,">
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+    }
+    body {
+      background-color: #ffffff;
+      font-family: "Courier New", Courier, monospace;
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      color: #000000;
+    }
 
-        .pd-canvas {
-            background-color: #ffffff;
-            border: 2px solid #000000;
-            box-shadow: 4px 4px 0px rgba(0, 0, 0, 0.15);
-        }
+    .pd-patch {
+      width: 300px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
 
-        .pd-border {
-            border: 2px solid #000000;
-        }
+    /* Toggle Switch / Checkbox */
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .pd-checkbox {
+      width: 45px;
+      height: 45px;
+      border: 2px solid #000000;
+      background-color: #fcfcfc;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      cursor: pointer;
+    }
+    .pd-checkbox.active::after {
+      content: "✕";
+      font-size: 32px;
+      font-weight: bold;
+      color: #000000;
+    }
+    .toggle-label {
+      font-size: 28px;
+      font-weight: bold;
+    }
 
-        /* Pure Data Floatatom Bevelled Style */
-        .floatatom {
-            background-color: #ffffff;
-            border: 2px solid #000000;
-            clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
-            font-weight: bold;
-            font-family: 'Courier New', Courier, monospace;
-        }
+    /* Automatic Level Controls */
+    .level-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .level-label {
+      font-size: 26px;
+      font-weight: bold;
+    }
+    .level-box {
+      border: 2px solid #000000;
+      width: 300px;
+      height: 60px;
+      display: grid;
+      grid-template-columns: 206px 90px;
+      background-color: #fcfcfc;
+    }
+    .vu-area {
+      position: relative;
+      border-right: 2px solid #000000;
+      display: flex;
+      align-items: center;
+      padding: 0;
+      overflow: hidden;
+      background: #e0e0e0;
+    }
+    .vu-meter-fill {
+      height: 100%;
+      width: 0%;
+      background-color: #4caf50;
+      transition: width 0.03s linear;
+    }
+    /* Auto-threshold visual marker overlay */
+    .threshold-marker {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background-color: #ff0000;
+      left: 10%;
+      transition: left 0.05s ease;
+      z-index: 2;
+    }
+    
+    /* Bang Circle Indicator */
+    .bang-area {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #fcfcfc;
+    }
+    .bang-circle {
+      width: 52px;
+      height: 52px;
+      border: 2px solid #000000;
+      border-radius: 50%;
+      background-color: #fcfcfc;
+      transition: background-color 0.05s ease-out;
+    }
+    .bang-circle.flash {
+      background-color: #000000;
+    }
 
-        /* Custom Range Slider styling for authentic PD look */
-        input[type=range] {
-            -webkit-appearance: none;
-            width: 100%;
-            background: transparent;
-        }
+    /* BPM Section */
+    .bpm-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .bpm-label {
+      font-size: 26px;
+      font-weight: bold;
+    }
+    .bpm-atom {
+      width: 300px;
+      height: 50px;
+      font-size: 36px;
+    }
 
-        input[type=range]:focus {
-            outline: none;
-        }
+    /* Variation Metrics Section */
+    .variation-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .metrics-labels {
+      display: flex;
+      gap: 6px;
+      width: 300px;
+    }
+    .metric-label {
+      flex: 1;
+      font-size: 13px;
+      font-weight: bold;
+      text-align: center;
+    }
 
-        input[type=range]::-webkit-slider-runnable-track {
-            width: 100%;
-            height: 12px;
-            cursor: pointer;
-            background: #e0e0e0;
-            border: 1px solid #000000;
-        }
+    /* Full Rectangle Number Atom Displays */
+    .atoms-row {
+      display: flex;
+      gap: 6px;
+      width: 300px;
+    }
+    .pd-atom {
+      flex: 1;
+      height: 42px;
+      border: 2px solid #000000;
+      background-color: #fcfcfc;
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      font-size: 32px;
+      font-weight: bold;
+      position: relative;
+    }
 
-        input[type=range]::-webkit-slider-thumb {
-            height: 20px;
-            width: 8px;
-            background: #000000;
-            cursor: pointer;
-            -webkit-appearance: none;
-            margin-top: -5px;
-        }
+    /* Concentric Accuracy Color Squares */
+    .squares-container {
+      position: relative;
+      width: 300px;
+      height: 300px;
+      margin-top: 10px;
+    }
+    .square-big {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 300px;
+      height: 300px;
+      background-color: #e1e1e1;
+      border: 2px solid #000000;
+      transition: background-color 0.15s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .square-med {
+      width: 200px;
+      height: 200px;
+      background-color: #e1e1e1;
+      border: 2px solid #000000;
+      transition: background-color 0.15s ease;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .square-sml {
+      width: 100px;
+      height: 100px;
+      background-color: #e1e1e1;
+      border: 2px solid #000000;
+      transition: background-color 0.15s ease;
+    }
 
-        /* Concentric Squares Container */
-        .squares-container {
-            position: relative;
-            width: 300px;
-            height: 300px;
-            margin: 0 auto;
-        }
-
-        .square-outer {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 300px;
-            height: 300px;
-            transition: background-color 0.15s ease;
-        }
-
-        .square-med {
-            position: absolute;
-            top: 50px;
-            left: 50px;
-            width: 200px;
-            height: 200px;
-            transition: background-color 0.15s ease;
-        }
-
-        .square-sml {
-            position: absolute;
-            top: 100px;
-            left: 100px;
-            width: 100px;
-            height: 100px;
-            transition: background-color 0.15s ease;
-        }
-
-        .bang-circle {
-            width: 48px;
-            height: 48px;
-            border-radius: 50%;
-            border: 2px solid #000000;
-            background-color: #ffffff;
-            transition: background-color 0.05s ease;
-        }
-
-        .bang-circle.active {
-            background-color: #000000;
-        }
-    </style>
+    .instructions {
+      margin-top: 15px;
+      font-size: 13px;
+      color: #555;
+      line-height: 1.4;
+      width: 300px;
+    }
+  </style>
 </head>
-<body class="min-h-screen p-4 flex flex-col items-center justify-center">
+<body>
 
-    <!-- Main Pd Canvas Frame -->
-    <div class="pd-canvas w-full max-w-lg p-6 rounded-none relative">
-        
-        <!-- Header Controls & Toggle -->
-        <div class="flex items-center justify-between mb-6">
-            <label class="flex items-center space-x-3 cursor-pointer text-xl font-bold">
-                <input type="checkbox" id="powerToggle" class="w-6 h-6 accent-black border-2 border-black cursor-pointer">
-                <span>on/off</span>
-            </label>
-
-            <!-- Secondary Utility Action Controls -->
-            <div class="flex items-center space-x-2">
-                <button id="resetBtn" class="pd-border px-3 py-1 text-sm font-bold bg-gray-100 hover:bg-gray-200 active:bg-black active:text-white transition">
-                    RESET
-                </button>
-                <button id="metronomeToggle" class="pd-border px-3 py-1 text-sm font-bold bg-gray-100 hover:bg-gray-200 transition">
-                    METRONOME: OFF
-                </button>
-            </div>
-        </div>
-
-        <!-- Set Level Box Section -->
-        <div class="mb-6">
-            <div class="text-lg font-bold mb-1">set level</div>
-            <div class="pd-border p-3 bg-white grid grid-cols-12 gap-3 items-center">
-                <!-- Sliders & Meters Column (Left 9 cols) -->
-                <div class="col-span-9 space-y-3">
-                    <!-- Threshold Slider -->
-                    <div>
-                        <div class="flex justify-between text-xs font-bold mb-0.5">
-                            <span>THRESHOLD</span>
-                            <span id="thresholdVal">70</span>
-                        </div>
-                        <input type="range" id="levelSlider" min="0" max="100" value="70">
-                    </div>
-                    <!-- Audio Level Monitor Bar -->
-                    <div>
-                        <div class="text-xs font-bold mb-0.5">AUDIO INPUT (MONS)</div>
-                        <div class="w-full h-4 bg-gray-100 pd-border relative overflow-hidden">
-                            <div id="monBar" class="h-full bg-black w-0 transition-all duration-75"></div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Bang Indicator Box (Right 3 cols) -->
-                <div class="col-span-3 flex flex-col items-center justify-center border-l-2 border-black pl-2">
-                    <span class="text-xs font-bold mb-1">TAPS</span>
-                    <div id="tapBang" class="bang-circle cursor-pointer flex items-center justify-center" title="Click or tap key to trigger"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Floatatom Display Row -->
-        <div class="grid grid-cols-3 gap-3 mb-6 text-center">
-            <!-- Instant Error -->
-            <div>
-                <div id="instantAtom" class="floatatom py-2 px-1 text-2xl text-right pr-3 shadow-inner">0</div>
-                <div class="text-xs font-bold mt-1 text-gray-700">instant</div>
-            </div>
-            <!-- 4-Beat Average Error -->
-            <div>
-                <div id="fourAveAtom" class="floatatom py-2 px-1 text-2xl text-right pr-3 shadow-inner">0</div>
-                <div class="text-xs font-bold mt-1 text-gray-700">4-note ave</div>
-            </div>
-            <!-- 16-Beat Average Error -->
-            <div>
-                <div id="sixteenAveAtom" class="floatatom py-2 px-1 text-2xl text-right pr-3 shadow-inner">0</div>
-                <div class="text-xs font-bold mt-1 text-gray-700">16-note ave</div>
-            </div>
-        </div>
-
-        <!-- Concentric Accuracy Color Squares -->
-        <div class="flex justify-center items-center my-4">
-            <div class="squares-container pd-border">
-                <!-- Outer Square: 16-note ave error (300px) -->
-                <div id="outerSquare" class="square-outer bg-red-600 flex items-start justify-start p-1 text-xs font-bold text-black opacity-90">
-                    16-AVE
-                </div>
-                <!-- Middle Square: 4-note ave error (200px) -->
-                <div id="medSquare" class="square-med bg-amber-500 pd-border flex items-start justify-start p-1 text-xs font-bold text-black opacity-90">
-                    4-AVE
-                </div>
-                <!-- Inner Square: Instant error (100px) -->
-                <div id="smlSquare" class="square-sml bg-red-600 pd-border flex items-start justify-start p-1 text-xs font-bold text-black opacity-90">
-                    INSTANT
-                </div>
-            </div>
-        </div>
-
-        <!-- Session Telemetry & BPM Bar -->
-        <div class="mt-4 pt-3 border-t-2 border-black flex justify-between items-center text-xs font-bold">
-            <div>TEMPO: <span id="bpmDisplay" class="text-sm">--</span> BPM</div>
-            <div>TAPS RECORDED: <span id="tapCountDisplay">0</span></div>
-            <div>DELTA: <span id="lastDeltaDisplay">--</span> ms</div>
-        </div>
-
-        <!-- Metronome Control Box -->
-        <div id="metronomeBox" class="mt-3 p-2 bg-gray-50 pd-border hidden flex items-center justify-between text-xs">
-            <span class="font-bold">METRONOME BPM:</span>
-            <input type="number" id="metroBpmInput" min="40" max="240" value="120" class="pd-border px-2 py-0.5 w-16 text-center font-bold">
-            <input type="range" id="metroBpmSlider" min="40" max="240" value="120" class="w-32">
-        </div>
-
-        <!-- Instructions Drawer -->
-        <div class="mt-4 p-3 bg-gray-100 pd-border text-xs leading-relaxed">
-            <div class="font-bold mb-1">HOW TO USE:</div>
-            <ol class="list-decimal pl-4 space-y-1">
-                <li>Check <strong>on/off</strong> to enable microphone access or play via keyboard.</li>
-                <li>Tap any keyboard key (Space, Enter, etc.) or play an instrument near mic.</li>
-                <li>Adjust <strong>threshold slider</strong> so background noise doesn't trigger taps, but percussion strikes do.</li>
-                <li><strong>Green</strong> = High Accuracy (&lt;2%), <strong>Yellow</strong> = Moderate Error (~5%), <strong>Red</strong> = Inaccurate (&gt;10%).</li>
-            </ol>
-        </div>
+  <div class="pd-patch">
+    <!-- DSP Audio Toggle -->
+    <div class="toggle-container" id="toggleDsp">
+      <div class="pd-checkbox" id="dspCheckbox"></div>
+      <div class="toggle-label">mic on/off</div>
     </div>
 
-    <script>
-        // Audio Engine States
-        let audioCtx = null;
-        let analyser = null;
-        let micStream = null;
-        let isAudioActive = false;
-        let metronomeInterval = null;
-        let metronomeActive = false;
+    <!-- Automatic Level Controls -->
+    <div class="level-section">
+      <div class="level-label">auto level</div>
+      <div class="level-box">
+        <div class="vu-area">
+          <div class="vu-meter-fill" id="vuMeter"></div>
+          <div class="threshold-marker" id="thresholdMarker" title="Auto-Calibrated Threshold"></div>
+        </div>
+        <div class="bang-area">
+          <div class="bang-circle" id="bangIndicator"></div>
+        </div>
+      </div>
+    </div>
 
-        // Peak Detector & Refractory States
-        let threshold = 70; // 0 - 100 scale
-        let lastTapTime = 0;
-        const REFRACTORY_PERIOD = 110; // ms minimum delay between tap triggers
+    <!-- Beats Per Minute Display -->
+    <div class="bpm-section">
+      <div class="bpm-label">bpm</div>
+      <div class="pd-atom bpm-atom" id="atomBpm">0</div>
+    </div>
 
-        // Mathematical Buffers matching Pd patch
-        let intervalBuffer = []; // stores last 4 interval deltas in ms
-        let instantErrorBuffer = []; // stores last 4 instant errors
-        let fourAveErrorBuffer = []; // stores last 4 4-note ave errors
-        let tapCounter = 0;
+    <!-- Variation Metrics Section -->
+    <div class="variation-section">
+      <div class="metrics-labels">
+        <div class="metric-label">% variation</div>
+        <div class="metric-label">last 4</div>
+        <div class="metric-label">last 16</div>
+      </div>
+      <div class="atoms-row">
+        <div class="pd-atom" id="atomInstant">0</div>
+        <div class="pd-atom" id="atom4ave">0</div>
+        <div class="pd-atom" id="atom16ave">0</div>
+      </div>
+    </div>
 
-        // DOM Elements
-        const powerToggle = document.getElementById('powerToggle');
-        const levelSlider = document.getElementById('levelSlider');
-        const thresholdVal = document.getElementById('thresholdVal');
-        const monBar = document.getElementById('monBar');
-        const tapBang = document.getElementById('tapBang');
+    <!-- Concentric Accuracy Color Squares -->
+    <div class="squares-container">
+      <div class="square-big" id="sqBig">
+        <div class="square-med" id="sqMed">
+          <div class="square-sml" id="sqSml"></div>
+        </div>
+      </div>
+    </div>
 
-        const instantAtom = document.getElementById('instantAtom');
-        const fourAveAtom = document.getElementById('fourAveAtom');
-        const sixteenAveAtom = document.getElementById('sixteenAveAtom');
+    <div class="instructions">
+      • <strong>Auto-Threshold:</strong> Red line on meter adapts automatically to background noise.<br>
+      • <strong>Microphone:</strong> Click <code>mic on/off</code> to toggle audio input.<br>
+      • <strong>Keyboard:</strong> Tap any key (e.g. Spacebar) to test timing without audio.
+    </div>
+  </div>
 
-        const outerSquare = document.getElementById('outerSquare');
-        const medSquare = document.getElementById('medSquare');
-        const smlSquare = document.getElementById('smlSquare');
+  <script>
+    let isAudioActive = false;
+    let audioCtx = null;
+    let micStream = null;
+    let scriptNode = null;
+    
+    // Adaptive Noise Floor and Peak Envelope Tracking
+    let noiseFloor = 0.01;
+    let peakEnvelope = 0.08;
+    let prevSample = 0;
+    let lastPeakTimeSec = 0;
 
-        const bpmDisplay = document.getElementById('bpmDisplay');
-        const tapCountDisplay = document.getElementById('tapCountDisplay');
-        const lastDeltaDisplay = document.getElementById('lastDeltaDisplay');
+    let intervalHistory = [];
+    let lastTapTimeMs = null;
+    
+    let instantErrors = [];
+    let ave4Errors = [];
 
-        const resetBtn = document.getElementById('resetBtn');
-        const metronomeToggle = document.getElementById('metronomeToggle');
-        const metronomeBox = document.getElementById('metronomeBox');
-        const metroBpmInput = document.getElementById('metroBpmInput');
-        const metroBpmSlider = document.getElementById('metroBpmSlider');
+    const dspCheckbox = document.getElementById('dspCheckbox');
+    const toggleDsp = document.getElementById('toggleDsp');
+    const vuMeter = document.getElementById('vuMeter');
+    const thresholdMarker = document.getElementById('thresholdMarker');
+    const bangIndicator = document.getElementById('bangIndicator');
+    
+    const atomBpm = document.getElementById('atomBpm');
+    const atomInstant = document.getElementById('atomInstant');
+    const atom4ave = document.getElementById('atom4ave');
+    const atom16ave = document.getElementById('atom16ave');
+    
+    const sqBig = document.getElementById('sqBig');
+    const sqMed = document.getElementById('sqMed');
+    const sqSml = document.getElementById('sqSml');
 
-        /**
-         * Maps Pure Data Variation Error % to smooth RGB Color
-         * 0% Error   -> Bright Green (rgb(0, 230, 0))
-         * 5% Error   -> Bright Amber / Yellow (rgb(255, 200, 0))
-         * 10%+ Error -> Bright Red (rgb(255, 0, 0))
-         */
-        function calculateColor(errorVal) {
-            if (isNaN(errorVal) || errorVal === null) return 'rgb(255, 0, 0)';
-            
-            if (errorVal <= 0) return 'rgb(0, 230, 0)';
-            if (errorVal < 5) {
-                // Interpolate Green to Yellow
-                const factor = errorVal / 5.0;
-                const r = Math.round(0 + factor * 255);
-                const g = Math.round(230 + factor * (200 - 230));
-                return `rgb(${r}, ${g}, 0)`;
-            } else if (errorVal < 10) {
-                // Interpolate Yellow to Red
-                const factor = (errorVal - 5.0) / 5.0;
-                const r = 255;
-                const g = Math.round(200 - factor * 200);
-                return `rgb(${r}, ${g}, 0)`;
-            } else {
-                return 'rgb(255, 0, 0)';
-            }
-        }
+    function resetDSPState() {
+      lastPeakTimeSec = 0;
+      prevSample = 0;
+      noiseFloor = 0.01;
+      peakEnvelope = 0.08;
+      lastTapTimeMs = null;
+      intervalHistory = [];
+      instantErrors = [];
+      ave4Errors = [];
+    }
 
-        /**
-         * Process a detected tap event
-         * Calculates interval deltas, variation averages, error percentages
-         */
-        function processTap() {
-            const now = performance.now();
-            tapCounter++;
-            tapCountDisplay.textContent = tapCounter;
+    toggleDsp.addEventListener('click', () => {
+      isAudioActive = !isAudioActive;
+      if (isAudioActive) {
+        dspCheckbox.classList.add('active');
+        initAudio();
+      } else {
+        dspCheckbox.classList.remove('active');
+        stopAudio();
+      }
+    });
 
-            // Flash bang indicator
-            tapBang.classList.add('active');
-            setTimeout(() => tapBang.classList.remove('active'), 80);
+    function triggerBang() {
+      bangIndicator.classList.add('flash');
+      setTimeout(() => {
+        bangIndicator.classList.remove('flash');
+      }, 80);
+    }
 
-            if (lastTapTime > 0) {
-                const delta = now - lastTapTime;
-                lastDeltaDisplay.textContent = Math.round(delta);
+    async function initAudio() {
+      resetDSPState();
 
-                // Calculate instant BPM based on last interval
-                if (delta > 0) {
-                    const bpm = Math.round(60000 / delta);
-                    bpmDisplay.textContent = bpm;
-                }
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        isAudioActive = false;
+        dspCheckbox.classList.remove('active');
+        return;
+      }
 
-                // Push new interval into circular buffer (max 4 items)
-                intervalBuffer.push(delta);
-                if (intervalBuffer.length > 4) {
-                    intervalBuffer.shift();
-                }
-
-                // If we have 4 interval deltas, execute full Pd Math logic
-                if (intervalBuffer.length === 4) {
-                    const T_n = intervalBuffer[3];
-                    const T_n1 = intervalBuffer[2];
-                    const T_n2 = intervalBuffer[1];
-                    const T_n3 = intervalBuffer[0];
-
-                    // T_avg4 = (T_n + T_n1 + T_n2 + T_n3) / 4
-                    const T_avg4 = (T_n + T_n1 + T_n2 + T_n3) / 4.0;
-
-                    // Consecutive interval difference absolute variations
-                    const d1 = Math.abs(T_n - T_n1);
-                    const d2 = Math.abs(T_n1 - T_n2);
-                    const d3 = Math.abs(T_n2 - T_n3);
-
-                    // Mean variation difference
-                    const D_mean = (d1 + d2 + d3) / 3.0;
-
-                    // Instant error % = (D_mean / T_avg4) * 100
-                    const instantError = Math.round((D_mean / T_avg4) * 100);
-                    instantAtom.textContent = instantError;
-                    smlSquare.style.backgroundColor = calculateColor(instantError);
-
-                    // Push instant error to 4-ave buffer
-                    instantErrorBuffer.push(instantError);
-                    if (instantErrorBuffer.length > 4) {
-                        instantErrorBuffer.shift();
-                    }
-
-                    if (instantErrorBuffer.length === 4) {
-                        const fourAveError = Math.round(
-                            instantErrorBuffer.reduce((a, b) => a + b, 0) / 4.0
-                        );
-                        fourAveAtom.textContent = fourAveError;
-                        medSquare.style.backgroundColor = calculateColor(fourAveError);
-
-                        // Push 4-ave error to 16-ave buffer
-                        fourAveErrorBuffer.push(fourAveError);
-                        if (fourAveErrorBuffer.length > 4) {
-                            fourAveErrorBuffer.shift();
-                        }
-
-                        if (fourAveErrorBuffer.length === 4) {
-                            const sixteenAveError = Math.round(
-                                fourAveErrorBuffer.reduce((a, b) => a + b, 0) / 4.0
-                            );
-                            sixteenAveAtom.textContent = sixteenAveError;
-                            outerSquare.style.backgroundColor = calculateColor(sixteenAveError);
-                        }
-                    }
-                }
-            }
-
-            lastTapTime = now;
-        }
-
-        async function startAudio() {
-            try {
-                if (!audioCtx) {
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                }
-                if (audioCtx.state === 'suspended') {
-                    await audioCtx.resume();
-                }
-
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: false,
-                        noiseSuppression: false,
-                        autoGainControl: false
-                    }
-                });
-
-                micStream = stream;
-                const source = audioCtx.createMediaStreamSource(stream);
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 512;
-                analyser.smoothingTimeConstant = 0.2;
-                source.connect(analyser);
-
-                isAudioActive = true;
-                processAudioFrame();
-            } catch (err) {
-                console.error("Microphone access error:", err);
-                alert("Microphone permission denied or not available. Keyboard tapping will still work!");
-                powerToggle.checked = false;
-            }
-        }
-
-        function stopAudio() {
-            isAudioActive = false;
-            if (micStream) {
-                micStream.getTracks().forEach(track => track.stop());
-                micStream = null;
-            }
-            monBar.style.width = '0%';
-        }
-
-        function processAudioFrame() {
-            if (!isAudioActive || !analyser) return;
-
-            const timeDomainData = new Float32Array(analyser.fftSize);
-            analyser.getFloatTimeDomainData(timeDomainData);
-
-            // Compute peak amplitude
-            let maxPeak = 0;
-            for (let i = 0; i < timeDomainData.length; i++) {
-                const absVal = Math.abs(timeDomainData[i]);
-                if (absVal > maxPeak) {
-                    maxPeak = absVal;
-                }
-            }
-
-            // Scale to 0-100 range
-            const currentLevel = Math.min(100, Math.round(maxPeak * 100 * 2.5));
-
-            // Update GUI audio meter ("mons")
-            monBar.style.width = currentLevel + '%';
-
-            // Peak threshold comparison with refractory period check
-            const now = performance.now();
-            if (currentLevel >= threshold && (now - lastTapTime) > REFRACTORY_PERIOD) {
-                processTap();
-            }
-
-            requestAnimationFrame(processAudioFrame);
-        }
-
-        function playClickSound() {
-            if (!audioCtx) return;
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
-            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
-            osc.connect(gain);
-            gain.connect(audioCtx.destination);
-            osc.start();
-            osc.stop(audioCtx.currentTime + 0.05);
-        }
-
-        function startMetronome() {
-            const bpm = parseInt(metroBpmInput.value) || 120;
-            const intervalMs = (60 / bpm) * 1000;
-            stopMetronome();
-            metronomeInterval = setInterval(() => {
-                playClickSound();
-            }, intervalMs);
-            metronomeActive = true;
-            metronomeToggle.textContent = `METRONOME: ON (${bpm} BPM)`;
-            metronomeToggle.classList.add('bg-black', 'text-white');
-        }
-
-        function stopMetronome() {
-            if (metronomeInterval) {
-                clearInterval(metronomeInterval);
-                metronomeInterval = null;
-            }
-            metronomeActive = false;
-            metronomeToggle.textContent = 'METRONOME: OFF';
-            metronomeToggle.classList.remove('bg-black', 'text-white');
-        }
-
-        function resetSession() {
-            intervalBuffer = [];
-            instantErrorBuffer = [];
-            fourAveErrorBuffer = [];
-            tapCounter = 0;
-            lastTapTime = 0;
-
-            instantAtom.textContent = '0';
-            fourAveAtom.textContent = '0';
-            sixteenAveAtom.textContent = '0';
-
-            bpmDisplay.textContent = '--';
-            tapCountDisplay.textContent = '0';
-            lastDeltaDisplay.textContent = '--';
-
-            const defaultRed = 'rgb(255, 0, 0)';
-            outerSquare.style.backgroundColor = defaultRed;
-            medSquare.style.backgroundColor = 'rgb(255, 200, 0)';
-            smlSquare.style.backgroundColor = defaultRed;
-        }
-
-        // GUI Listeners
-        powerToggle.addEventListener('change', (e) => {
-            if (e.target.checked) {
-                startAudio();
-            } else {
-                stopAudio();
-            }
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false
+          }
         });
 
-        levelSlider.addEventListener('input', (e) => {
-            threshold = parseInt(e.target.value);
-            thresholdVal.textContent = threshold;
-        });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') {
+          await audioCtx.resume();
+        }
 
-        tapBang.addEventListener('pointerdown', () => {
-            const now = performance.now();
-            if ((now - lastTapTime) > REFRACTORY_PERIOD) {
-                processTap();
+        const source = audioCtx.createMediaStreamSource(micStream);
+        scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
+        
+        source.connect(scriptNode);
+        scriptNode.connect(audioCtx.destination);
+        scriptNode.onaudioprocess = processAudioBuffer;
+      } catch (err) {
+        isAudioActive = false;
+        dspCheckbox.classList.remove('active');
+      }
+    }
+
+    function stopAudio() {
+      resetDSPState();
+
+      if (scriptNode) scriptNode.disconnect();
+      if (micStream) micStream.getTracks().forEach(t => t.stop());
+      if (audioCtx) audioCtx.close();
+      vuMeter.style.width = '0%';
+    }
+
+    function processAudioBuffer(evt) {
+      const input = evt.inputBuffer.getChannelData(0);
+      const bufferLen = input.length;
+      const sampleRate = evt.inputBuffer.sampleRate;
+      const sampleDuration = 1.0 / sampleRate;
+      const bufferStartTime = evt.playbackTime;
+
+      let maxAmp = 0;
+      let detectedSampleIdx = -1;
+      const minInterBeatSec = 0.12; 
+
+      for (let i = 0; i < bufferLen; i++) {
+        const absVal = Math.abs(input[i]);
+        if (absVal > maxAmp) maxAmp = absVal;
+
+        // Continuous noise floor adaptation
+        if (absVal < noiseFloor) {
+          noiseFloor = noiseFloor * 0.95 + absVal * 0.05;
+        } else {
+          noiseFloor = noiseFloor * 0.9995 + absVal * 0.0005;
+        }
+
+        // Dynamic peak envelope tracking
+        if (absVal > peakEnvelope) {
+          peakEnvelope = absVal;
+        } else {
+          peakEnvelope = Math.max(0.04, peakEnvelope * 0.9992);
+        }
+
+        // Auto-calculated trigger threshold
+        const dynamicThreshold = Math.max(0.035, noiseFloor + (peakEnvelope - noiseFloor) * 0.32);
+
+        const derivative = Math.max(0, absVal - prevSample);
+        prevSample = absVal;
+
+        // Dynamic transient onset detection
+        if (derivative > (dynamicThreshold * 0.35) && absVal > dynamicThreshold) {
+          const currentSampleTimeSec = bufferStartTime + (i * sampleDuration);
+
+          if (currentSampleTimeSec - lastPeakTimeSec > minInterBeatSec) {
+            let localMaxIdx = i;
+            let localMaxVal = absVal;
+            for (let k = 1; k <= 3 && (i + k) < bufferLen; k++) {
+              if (Math.abs(input[i + k]) > localMaxVal) {
+                localMaxVal = Math.abs(input[i + k]);
+                localMaxIdx = i + k;
+              }
             }
-        });
+            detectedSampleIdx = localMaxIdx;
+            lastPeakTimeSec = bufferStartTime + (detectedSampleIdx * sampleDuration);
+            break;
+          }
+        }
+      }
 
-        resetBtn.addEventListener('click', resetSession);
+      // Update green VU meter level
+      const meterPercent = Math.min(100, Math.max(0, (maxAmp / 0.8) * 100));
+      vuMeter.style.width = meterPercent + '%';
 
-        metronomeToggle.addEventListener('click', () => {
-            if (!audioCtx) {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (metronomeActive) {
-                stopMetronome();
-                metronomeBox.classList.add('hidden');
-            } else {
-                metronomeBox.classList.remove('hidden');
-                startMetronome();
-            }
-        });
+      // Update position of red dynamic threshold marker line
+      const currentDynamicThresh = Math.max(0.035, noiseFloor + (peakEnvelope - noiseFloor) * 0.32);
+      const threshPercent = Math.min(98, Math.max(2, (currentDynamicThresh / 0.8) * 100));
+      thresholdMarker.style.left = threshPercent + '%';
 
-        metroBpmInput.addEventListener('change', () => {
-            metroBpmSlider.value = metroBpmInput.value;
-            if (metronomeActive) startMetronome();
-        });
+      if (detectedSampleIdx >= 0) {
+        const exactTimeMs = lastPeakTimeSec * 1000.0;
+        registerTap(exactTimeMs);
+      }
+    }
 
-        metroBpmSlider.addEventListener('input', () => {
-            metroBpmInput.value = metroBpmSlider.value;
-            if (metronomeActive) startMetronome();
-        });
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat) return;
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+      }
+      registerTap(performance.now());
+    });
 
-        // Keyboard Event Listener for Tapping
-        window.addEventListener('keydown', (e) => {
-            // Avoid triggering when user is typing into input fields
-            if (e.target.tagName === 'INPUT') return;
+    function registerTap(nowMs) {
+      triggerBang();
 
-            // Prevent browser scrolling on spacebar
-            if (e.code === 'Space') {
-                e.preventDefault();
-            }
+      if (lastTapTimeMs !== null) {
+        const interval = nowMs - lastTapTimeMs;
+        
+        if (interval >= 120) {
+          // Store interval history up to 16 samples
+          intervalHistory.push(interval);
+          if (intervalHistory.length > 16) {
+            intervalHistory.shift();
+          }
 
-            const now = performance.now();
-            if ((now - lastTapTime) > REFRACTORY_PERIOD) {
-                processTap();
-            }
-        });
+          // Calculate average BPM using up to the last 16 clicks
+          const avgInterval = intervalHistory.reduce((a, b) => a + b, 0) / intervalHistory.length;
+          const currentBpm = Math.round(60000 / avgInterval);
+          atomBpm.textContent = currentBpm;
 
-        // Initial setup
-        resetSession();
-    </script>
+          if (intervalHistory.length >= 4) {
+            calculateAccuracyMetrics();
+          }
+        }
+      }
+      lastTapTimeMs = nowMs;
+    }
+
+    function calculateAccuracyMetrics() {
+      // Use latest 4 intervals for variation metrics calculation
+      const last4 = intervalHistory.slice(-4);
+      const [t3, t2, t1, t0] = last4;
+
+      const tAvg4 = (t0 + t1 + t2 + t3) / 4.0;
+
+      const diff1 = Math.abs(t0 - t1);
+      const diff2 = Math.abs(t1 - t2);
+      const diff3 = Math.abs(t2 - t3);
+
+      const meanDiff = (diff1 + diff2 + diff3) / 3.0;
+
+      const instantVal = Math.round((meanDiff / tAvg4) * 100);
+
+      instantErrors.push(instantVal);
+      if (instantErrors.length > 4) instantErrors.shift();
+
+      const ave4Val = Math.round(
+        instantErrors.reduce((a, b) => a + b, 0) / instantErrors.length
+      );
+
+      ave4Errors.push(ave4Val);
+      if (ave4Errors.length > 4) ave4Errors.shift();
+
+      const ave16Val = Math.round(
+        ave4Errors.reduce((a, b) => a + b, 0) / ave4Errors.length
+      );
+
+      atomInstant.textContent = instantVal;
+      atom4ave.textContent = ave4Val;
+      atom16ave.textContent = ave16Val;
+
+      sqSml.style.backgroundColor = getPDColor(instantVal);
+      sqMed.style.backgroundColor = getPDColor(ave4Val);
+      sqBig.style.backgroundColor = getPDColor(ave16Val);
+    }
+
+    function getPDColor(err) {
+      if (err === null || err === undefined || isNaN(err)) return '#e1e1e1';
+      const e = Math.max(0, err);
+      let r = 0, g = 0, b = 0;
+
+      if (e <= 0) {
+        r = 0; g = 225; b = 0;
+      } else if (e <= 5) {
+        r = Math.min(255, Math.round(51 * e));
+        g = 225;
+        b = 0;
+      } else if (e <= 10) {
+        r = 255;
+        g = Math.max(0, Math.round(225 - 51 * (e - 5)));
+        b = 0;
+      } else {
+        r = 255; g = 0; b = 0;
+      }
+
+      const toHex = (n) => n.toString(16).padStart(2, '0');
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+  </script>
 </body>
 </html>
