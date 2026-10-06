@@ -63,9 +63,19 @@
       flex-direction: column;
       gap: 4px;
     }
+    .level-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
     .level-label {
       font-size: 26px;
       font-weight: bold;
+    }
+    .calib-status {
+      font-size: 11px;
+      font-weight: bold;
+      color: #d32f2f;
     }
     .level-box {
       border: 2px solid #000000;
@@ -90,7 +100,10 @@
       background-color: #4caf50;
       transition: width 0.03s linear;
     }
-    /* Auto-threshold visual marker overlay */
+    .vu-meter-fill.calibrating {
+      background-color: #ff9800;
+    }
+    /* Dynamic trigger threshold marker line */
     .threshold-marker {
       position: absolute;
       top: 0;
@@ -232,11 +245,14 @@
 
     <!-- Automatic Level Controls -->
     <div class="level-section">
-      <div class="level-label">auto level</div>
+      <div class="level-header">
+        <div class="level-label">auto level</div>
+        <div class="calib-status" id="calibStatus"></div>
+      </div>
       <div class="level-box">
         <div class="vu-area">
           <div class="vu-meter-fill" id="vuMeter"></div>
-          <div class="threshold-marker" id="thresholdMarker" title="Auto-Calibrated Threshold"></div>
+          <div class="threshold-marker" id="thresholdMarker" title="Noise-Filtered Trigger Threshold"></div>
         </div>
         <div class="bang-area">
           <div class="bang-circle" id="bangIndicator"></div>
@@ -274,23 +290,32 @@
     </div>
 
     <div class="instructions">
-      • <strong>Auto-Threshold:</strong> Red line on meter adapts automatically to background noise.<br>
-      • <strong>Microphone:</strong> Click <code>mic on/off</code> to toggle audio input.<br>
-      • <strong>Keyboard:</strong> Tap any key (e.g. Spacebar) to test timing without audio.
+      • <strong>Low Frequency Enhanced:</strong> Sensitive to bass notes & kick drums.<br>
+      • <strong>Sustain Anti-Double Trigger:</strong> Re-trigger gate follows note decay.<br>
+      • <strong>Calibration:</strong> Remain silent for 1.5s when toggling mic.
     </div>
   </div>
 
   <script>
     let isAudioActive = false;
+    let isCalibrating = false;
+    let calibStartTimeMs = 0;
+    
     let audioCtx = null;
     let micStream = null;
     let scriptNode = null;
+    let lowShelfFilter = null;
     
-    // Adaptive Noise Floor and Peak Envelope Tracking
-    let noiseFloor = 0.01;
-    let peakEnvelope = 0.08;
-    let prevSample = 0;
+    // Calibration & Envelope Follower Variables
+    let maxCalibNoisePeak = 0.01;
+    let noiseFloorThreshold = 0.05;
+    let peakHoldEnvelope = 0.0;
     let lastPeakTimeSec = 0;
+
+    // Ring buffer for 12-sample lag derivative (low frequency transient detection)
+    const LAG_SAMPLES = 12;
+    let sampleRingBuf = new Float32Array(LAG_SAMPLES);
+    let ringBufIdx = 0;
 
     let intervalHistory = [];
     let lastTapTimeMs = null;
@@ -303,6 +328,7 @@
     const vuMeter = document.getElementById('vuMeter');
     const thresholdMarker = document.getElementById('thresholdMarker');
     const bangIndicator = document.getElementById('bangIndicator');
+    const calibStatus = document.getElementById('calibStatus');
     
     const atomBpm = document.getElementById('atomBpm');
     const atomInstant = document.getElementById('atomInstant');
@@ -315,9 +341,11 @@
 
     function resetDSPState() {
       lastPeakTimeSec = 0;
-      prevSample = 0;
-      noiseFloor = 0.01;
-      peakEnvelope = 0.08;
+      maxCalibNoisePeak = 0.002;
+      noiseFloorThreshold = 0.05;
+      peakHoldEnvelope = 0.0;
+      ringBufIdx = 0;
+      sampleRingBuf.fill(0);
       lastTapTimeMs = null;
       intervalHistory = [];
       instantErrors = [];
@@ -366,9 +394,23 @@
         }
 
         const source = audioCtx.createMediaStreamSource(micStream);
+
+        // Low-shelf Biquad Filter to boost low frequency notes (+6dB below 250Hz)
+        lowShelfFilter = audioCtx.createBiquadFilter();
+        lowShelfFilter.type = 'lowshelf';
+        lowShelfFilter.frequency.value = 250;
+        lowShelfFilter.gain.value = 6;
+
         scriptNode = audioCtx.createScriptProcessor(2048, 1, 1);
         
-        source.connect(scriptNode);
+        // Start 1.5 second background room noise calibration
+        isCalibrating = true;
+        calibStartTimeMs = performance.now();
+        calibStatus.textContent = "[CALIBRATING...]";
+        vuMeter.classList.add('calibrating');
+
+        source.connect(lowShelfFilter);
+        lowShelfFilter.connect(scriptNode);
         scriptNode.connect(audioCtx.destination);
         scriptNode.onaudioprocess = processAudioBuffer;
       } catch (err) {
@@ -381,9 +423,14 @@
       resetDSPState();
 
       if (scriptNode) scriptNode.disconnect();
+      if (lowShelfFilter) lowShelfFilter.disconnect();
       if (micStream) micStream.getTracks().forEach(t => t.stop());
       if (audioCtx) audioCtx.close();
+      
       vuMeter.style.width = '0%';
+      vuMeter.classList.remove('calibrating');
+      calibStatus.textContent = "";
+      isCalibrating = false;
     }
 
     function processAudioBuffer(evt) {
@@ -393,64 +440,80 @@
       const sampleDuration = 1.0 / sampleRate;
       const bufferStartTime = evt.playbackTime;
 
-      let maxAmp = 0;
+      let maxBufferAmp = 0;
       let detectedSampleIdx = -1;
-      const minInterBeatSec = 0.12; 
+      const minInterBeatSec = 0.15; // Refractory hold-off period (up to 400 BPM)
+
+      const now = performance.now();
 
       for (let i = 0; i < bufferLen; i++) {
         const absVal = Math.abs(input[i]);
-        if (absVal > maxAmp) maxAmp = absVal;
+        if (absVal > maxBufferAmp) maxBufferAmp = absVal;
 
-        // Continuous noise floor adaptation
-        if (absVal < noiseFloor) {
-          noiseFloor = noiseFloor * 0.95 + absVal * 0.05;
+        if (isCalibrating) {
+          // Record highest ambient room noise spike
+          if (absVal > maxCalibNoisePeak) {
+            maxCalibNoisePeak = absVal;
+          }
         } else {
-          noiseFloor = noiseFloor * 0.9995 + absVal * 0.0005;
-        }
+          // 12-sample lag difference for low frequency transient sensitivity
+          const lagVal = sampleRingBuf[ringBufIdx];
+          sampleRingBuf[ringBufIdx] = absVal;
+          ringBufIdx = (ringBufIdx + 1) % LAG_SAMPLES;
 
-        // Dynamic peak envelope tracking
-        if (absVal > peakEnvelope) {
-          peakEnvelope = absVal;
-        } else {
-          peakEnvelope = Math.max(0.04, peakEnvelope * 0.9992);
-        }
+          const lowFreqDerivative = Math.max(0, absVal - lagVal);
 
-        // Auto-calculated trigger threshold
-        const dynamicThreshold = Math.max(0.035, noiseFloor + (peakEnvelope - noiseFloor) * 0.32);
+          // Update peak envelope follower
+          if (absVal > peakHoldEnvelope) {
+            peakHoldEnvelope = absVal;
+          } else {
+            peakHoldEnvelope *= 0.9996; // Smooth decay over ~250ms
+          }
 
-        const derivative = Math.max(0, absVal - prevSample);
-        prevSample = absVal;
+          // Active threshold adapts dynamically to room noise floor AND sustained note decay
+          const activeThreshold = Math.max(noiseFloorThreshold, peakHoldEnvelope * 0.70);
 
-        // Dynamic transient onset detection
-        if (derivative > (dynamicThreshold * 0.35) && absVal > dynamicThreshold) {
-          const currentSampleTimeSec = bufferStartTime + (i * sampleDuration);
+          // Dynamic trigger condition: Must exceed active threshold AND have a sharp attack slope
+          if (absVal > activeThreshold && lowFreqDerivative > (activeThreshold * 0.25)) {
+            const currentSampleTimeSec = bufferStartTime + (i * sampleDuration);
 
-          if (currentSampleTimeSec - lastPeakTimeSec > minInterBeatSec) {
-            let localMaxIdx = i;
-            let localMaxVal = absVal;
-            for (let k = 1; k <= 3 && (i + k) < bufferLen; k++) {
-              if (Math.abs(input[i + k]) > localMaxVal) {
-                localMaxVal = Math.abs(input[i + k]);
-                localMaxIdx = i + k;
+            if (currentSampleTimeSec - lastPeakTimeSec > minInterBeatSec) {
+              let localMaxIdx = i;
+              let localMaxVal = absVal;
+              for (let k = 1; k <= 3 && (i + k) < bufferLen; k++) {
+                if (Math.abs(input[i + k]) > localMaxVal) {
+                  localMaxVal = Math.abs(input[i + k]);
+                  localMaxIdx = i + k;
+                }
               }
+              detectedSampleIdx = localMaxIdx;
+              lastPeakTimeSec = bufferStartTime + (detectedSampleIdx * sampleDuration);
+              break;
             }
-            detectedSampleIdx = localMaxIdx;
-            lastPeakTimeSec = bufferStartTime + (detectedSampleIdx * sampleDuration);
-            break;
           }
         }
       }
 
-      // Update green VU meter level
-      const meterPercent = Math.min(100, Math.max(0, (maxAmp / 0.8) * 100));
+      // Finalize room noise calibration after 1.5 seconds
+      if (isCalibrating && (now - calibStartTimeMs > 1500)) {
+        isCalibrating = false;
+        calibStatus.textContent = "";
+        vuMeter.classList.remove('calibrating');
+
+        // Pin baseline threshold safely above calibrated ambient noise floor
+        noiseFloorThreshold = Math.max(maxCalibNoisePeak * 2.8, maxCalibNoisePeak + 0.035);
+      }
+
+      // Display VU Meter normalized to max expected scale
+      const displayScale = Math.max(noiseFloorThreshold * 2.2, 0.20);
+      const meterPercent = Math.min(100, Math.max(0, (maxBufferAmp / displayScale) * 100));
       vuMeter.style.width = meterPercent + '%';
 
-      // Update position of red dynamic threshold marker line
-      const currentDynamicThresh = Math.max(0.035, noiseFloor + (peakEnvelope - noiseFloor) * 0.32);
-      const threshPercent = Math.min(98, Math.max(2, (currentDynamicThresh / 0.8) * 100));
+      // Position red threshold line on the meter
+      const threshPercent = Math.min(98, Math.max(2, (noiseFloorThreshold / displayScale) * 100));
       thresholdMarker.style.left = threshPercent + '%';
 
-      if (detectedSampleIdx >= 0) {
+      if (detectedSampleIdx >= 0 && !isCalibrating) {
         const exactTimeMs = lastPeakTimeSec * 1000.0;
         registerTap(exactTimeMs);
       }
